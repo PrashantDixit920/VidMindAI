@@ -17,6 +17,16 @@ _WAV_BYTES_PER_SECOND = 16000 * 2
 _WAV_HEADER_BYTES = 44
 
 
+def _download_failed_message(exc: Exception) -> str:
+    detail = str(exc).replace("ERROR: ", "").strip()[-160:]
+    return (
+        "The video could not be downloaded. YouTube often blocks downloads from "
+        "cloud servers, and the video may also be private or removed. "
+        "Please upload the audio or video file instead. "
+        f"(Details: {detail})"
+    )
+
+
 def _require_ffmpeg() -> None:
     if shutil.which("ffmpeg") is None:
         raise RuntimeError(
@@ -30,8 +40,11 @@ def download_youtube_audio(url: str, work_dir: str, max_minutes: int = MAX_VIDEO
     base_opts = {"quiet": True, "no_warnings": True, "noplaylist": True}
 
     # Check the length first so a very long video is rejected before downloading.
-    with yt_dlp.YoutubeDL(base_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    try:
+        with yt_dlp.YoutubeDL(base_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except yt_dlp.utils.DownloadError as exc:
+        raise RuntimeError(_download_failed_message(exc)) from exc
     duration = info.get("duration")
     if duration and duration > max_minutes * 60:
         raise ValueError(
@@ -43,8 +56,11 @@ def download_youtube_audio(url: str, work_dir: str, max_minutes: int = MAX_VIDEO
         "format": "bestaudio/best",
         "outtmpl": os.path.join(work_dir, "download.%(ext)s"),
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.download([url])
+    except yt_dlp.utils.DownloadError as exc:
+        raise RuntimeError(_download_failed_message(exc)) from exc
 
     files = glob.glob(os.path.join(work_dir, "download.*"))
     if not files:
@@ -101,19 +117,21 @@ def process_input(source: str, work_dir: str, chunk_minutes: int = 10) -> list:
     """
     downloaded = None
     if source.startswith(("http://", "https://")):
+        print("Detected a link. Downloading audio...")
         downloaded = download_youtube_audio(source, work_dir)
         input_path = downloaded
     else:
         if not os.path.isfile(source):
             raise FileNotFoundError(f"File not found: {source}")
+        print("Detected a local file. Converting...")
         input_path = source
 
-   
+    print("Converting and chunking audio...")
     chunks = convert_and_chunk(input_path, os.path.join(work_dir, "chunks"), chunk_minutes)
 
     # The raw download is no longer needed once the chunks exist.
     if downloaded and os.path.exists(downloaded):
         os.remove(downloaded)
 
-   
+    print(f"Audio ready: {len(chunks)} chunk(s) created.")
     return chunks

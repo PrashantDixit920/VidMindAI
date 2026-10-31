@@ -18,8 +18,17 @@ from core.rag_engine import build_rag_chain, ask_question
 
 load_dotenv()
 
+# On Streamlit Cloud there is no .env file; keys come from st.secrets.
+# Copy them into the environment so the rest of the code can use os.getenv.
+try:
+    for _key, _value in st.secrets.items():
+        if isinstance(_value, str):
+            os.environ.setdefault(_key, _value)
+except Exception:
+    pass  # no secrets file when running locally
+
 st.set_page_config(
-    page_title="VidMindAI: Watch less, know more",
+    page_title="VidMind: Watch less, know more",
     page_icon="🎬",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -371,6 +380,7 @@ with st.sidebar:
     source, uploaded = None, None
     if input_mode == "YouTube link":
         source = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=…")
+        st.caption("YouTube may block downloads on the hosted app. If a link fails, upload the file instead.")
     else:
         uploaded = st.file_uploader(
             "Audio or video file",
