@@ -45,7 +45,10 @@ vidmind/
 │   └── rag_engine.py       # RAG chain and question answering
 ├── utils/
 │   └── audio_processor.py  # download, convert and chunk audio
+├
+│
 ├── requirements.txt
+├── packages.txt            # system packages for Streamlit Cloud (ffmpeg)
 └── .gitignore
 ```
 
@@ -100,7 +103,7 @@ Never commit your real `.env` file. It is already listed in `.gitignore`.
 
 ## Deploy on Streamlit Community Cloud
 
-1. Push the project to a GitHub repository. Check that `requirements.txt` is included. `packages.txt` should contain one line: `ffmpeg`.
+1. Push the project to a GitHub repository. Check that `requirements.txt` and `packages.txt` are included. `packages.txt` should contain one line: `ffmpeg`.
 2. On [share.streamlit.io](https://share.streamlit.io), create a new app from the repository and set the main file to `app.py`.
 3. Open **Advanced settings → Secrets** and paste your keys in TOML format:
 
