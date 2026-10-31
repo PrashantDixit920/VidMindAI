@@ -375,12 +375,12 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    input_mode = st.radio("Source", ["YouTube link", "Upload a file"], horizontal=True)
+    input_mode = st.radio("Source", ["Upload a file", "YouTube link"], horizontal=True)
 
     source, uploaded = None, None
     if input_mode == "YouTube link":
         source = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=…")
-        st.caption("YouTube may block downloads on the hosted app. If a link fails, upload the file instead.")
+        st.caption("YouTube often blocks downloads from cloud servers, so links may fail on the hosted app. Uploading a file is more reliable.")
     else:
         uploaded = st.file_uploader(
             "Audio or video file",
