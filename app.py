@@ -15,6 +15,11 @@ from core.extractor import (
     extract_questions,
 )
 from core.rag_engine import build_rag_chain, ask_question
+from utils.youtube_captions import (
+    CaptionsUnavailable,
+    clean_pasted_transcript,
+    fetch_captions,
+)
 
 load_dotenv()
 
@@ -329,31 +334,19 @@ def build_export(result: dict) -> str:
     )
 
 
-def run_pipeline_ui(source: str, language: str) -> dict:
-    """Same steps as run_pipeline(), with live progress."""
-    with st.status("Processing your video…", expanded=True) as status:
-        # All downloads and chunks live in a temp folder that is deleted
-        # as soon as transcription finishes (or fails).
-        with tempfile.TemporaryDirectory() as work_dir:
-            st.write("🎧 Fetching and splitting audio")
-            chunks = process_input(source, work_dir)
+def build_result(transcript: str) -> dict:
+    """Everything after the transcript exists. Call inside an st.status block."""
+    st.write("✍️ Writing title and summary")
+    title = generate_title(transcript)
+    summary = summarize(transcript)
 
-            st.write("📝 Transcribing speech")
-            transcript = transcribe_all(chunks, language=language)
+    st.write("🔎 Finding action items, decisions and open questions")
+    action_items = extract_action_items(transcript)
+    decisions = extract_key_decisions(transcript)
+    questions = extract_questions(transcript)
 
-        st.write("✍️ Writing title and summary")
-        title = generate_title(transcript)
-        summary = summarize(transcript)
-
-        st.write("🔎 Finding action items, decisions and open questions")
-        action_items = extract_action_items(transcript)
-        decisions = extract_key_decisions(transcript)
-        questions = extract_questions(transcript)
-
-        st.write("🧠 Indexing transcript for chat")
-        rag_chain = build_rag_chain(transcript)
-
-        status.update(label="Done. Your video is ready.", state="complete", expanded=False)
+    st.write("🧠 Indexing transcript for chat")
+    rag_chain = build_rag_chain(transcript)
 
     return {
         "title": title,
@@ -366,6 +359,60 @@ def run_pipeline_ui(source: str, language: str) -> dict:
     }
 
 
+def transcribe_media(source: str, language: str) -> str:
+    """Audio or video file (or link) to transcript, using a temp folder that is
+    deleted as soon as transcription finishes or fails."""
+    with tempfile.TemporaryDirectory() as work_dir:
+        st.write("🎧 Fetching and splitting audio")
+        chunks = process_input(source, work_dir)
+
+        st.write("📝 Transcribing speech")
+        return transcribe_all(chunks, language=language)
+
+
+def run_media(source: str, language: str) -> dict:
+    """Uploaded file path -> full result."""
+    with st.status("Processing your video…", expanded=True) as status:
+        transcript = transcribe_media(source, language)
+        result = build_result(transcript)
+        status.update(label="Done. Your video is ready.", state="complete", expanded=False)
+    return result
+
+
+def run_transcript(transcript: str) -> dict:
+    """Already have the text (pasted) -> full result."""
+    with st.status("Analyzing the transcript…", expanded=True) as status:
+        result = build_result(transcript)
+        status.update(label="Done. Your transcript is ready.", state="complete", expanded=False)
+    return result
+
+
+def run_youtube(url: str, language: str) -> dict:
+    """YouTube link: try the video's captions first, then fall back to audio."""
+    with st.status("Processing your video…", expanded=True) as status:
+        st.write("📄 Looking for YouTube captions")
+        transcript, caption_problem = None, ""
+        try:
+            transcript = fetch_captions(url)
+            st.write("✅ Captions found")
+        except CaptionsUnavailable as exc:
+            caption_problem = str(exc)
+            st.write(f"Captions not available ({caption_problem}). Trying the audio instead.")
+
+        if transcript is None:
+            try:
+                transcript = transcribe_media(url, language)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Captions: {caption_problem}. Audio download: {exc} "
+                    "You can also use 'Paste transcript' or upload the file."
+                ) from exc
+
+        result = build_result(transcript)
+        status.update(label="Done. Your video is ready.", state="complete", expanded=False)
+    return result
+
+
 # ================================================================ sidebar
 with st.sidebar:
     st.markdown(
@@ -375,21 +422,41 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    input_mode = st.radio("Source", ["Upload a file", "YouTube link"], horizontal=True)
+    input_mode = st.radio(
+        "Source", ["Upload a file", "YouTube link", "Paste transcript"]
+    )
 
-    source, uploaded = None, None
+    source, uploaded, pasted = None, None, ""
     if input_mode == "YouTube link":
         source = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=…")
-        st.caption("YouTube often blocks downloads from cloud servers, so links may fail on the hosted app. Uploading a file is more reliable.")
+        st.caption(
+            "VidMind first reads the video's captions. If there are none, it tries the audio. "
+            "YouTube often blocks cloud servers, so on the hosted app a link may fail. "
+            "Use Paste transcript or upload a file then."
+        )
+    elif input_mode == "Paste transcript":
+        pasted = st.text_area(
+            "Transcript",
+            height=220,
+            placeholder="Paste the transcript here. Timestamps are removed automatically.",
+        )
+        st.caption("On YouTube: open the video, click ...more, choose Show transcript, then copy the text.")
     else:
         uploaded = st.file_uploader(
             "Audio or video file",
             type=["mp3", "wav", "m4a", "mp4", "mov", "mkv", "webm"],
         )
 
-    language = st.selectbox("Spoken language", ["english", "hinglish"])
+    if input_mode == "Paste transcript":
+        language = "english"
+    else:
+        language = st.selectbox("Spoken language", ["english", "hinglish"])
     st.write("")
-    process_clicked = st.button("Process video", type="primary", use_container_width=True)
+    process_clicked = st.button(
+        "Analyze transcript" if input_mode == "Paste transcript" else "Process video",
+        type="primary",
+        use_container_width=True,
+    )
 
     if st.session_state.result:
         st.divider()
@@ -411,21 +478,32 @@ if process_clicked:
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(uploaded.getbuffer())
                 tmp_path = tmp.name
-            source_value, label = tmp_path, uploaded.name
+            new_result, label = run_media(tmp_path, language), uploaded.name
+
+        elif input_mode == "Paste transcript":
+            cleaned = clean_pasted_transcript(pasted)
+            if len(cleaned.split()) < 30:
+                st.sidebar.error("Paste a longer transcript (at least a few sentences).")
+                st.stop()
+            if len(cleaned) > 300_000:
+                st.sidebar.error("That transcript is too long. Try a shorter one.")
+                st.stop()
+            new_result, label = run_transcript(cleaned), "Pasted transcript"
+
         else:
             if not source or not source.strip():
                 st.sidebar.error("Paste a YouTube link first.")
                 st.stop()
-            source_value, label = source.strip(), source.strip()
+            new_result, label = run_youtube(source.strip(), language), source.strip()
 
-        st.session_state.result = run_pipeline_ui(source_value, language)
+        st.session_state.result = new_result
         st.session_state.chat = []
         st.session_state.source_label = label
         st.session_state.language = language
     except Exception as exc:
         st.error(
             f"Processing stopped: {exc}\n\n"
-            "Check the link or file, your API keys in `.env`, and that ffmpeg is installed."
+            "Check the link or file, your API keys, and that ffmpeg is installed."
         )
     finally:
         if tmp_path and os.path.exists(tmp_path):

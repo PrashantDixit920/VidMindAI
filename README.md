@@ -6,7 +6,10 @@ VidMindAI turns a YouTube link or a recording into a summary, action items, key 
 
 ## Features
 
-- **Two ways in:** paste a YouTube link, or upload an audio or video file (mp3, wav, m4a, mp4, mov, mkv, webm).
+- **Three ways in:**
+  - **YouTube link:** VidMind first reads the video's existing captions (fast, no download). If there are none, it falls back to downloading the audio.
+  - **Upload a file:** audio or video (mp3, wav, m4a, mp4, mov, mkv, webm).
+  - **Paste transcript:** copy the text from YouTube's "Show transcript" panel and paste it in. Timestamps are removed automatically. No download or transcription is needed.
 - **Two languages:** English, or Hinglish (mixed Hindi and English speech, transcribed and translated to English).
 - **Structured notes:** title, summary, action items, key decisions and open questions.
 - **Searchable transcript:** find any word or phrase, and download everything as a Markdown file.
@@ -45,8 +48,8 @@ vidmind/
 │   └── rag_engine.py       # RAG chain and question answering
 ├── utils/
 │   └── audio_processor.py  # download, convert and chunk audio
-├
-│
+├── .streamlit/
+│   └── config.toml         # dark theme settings
 ├── requirements.txt
 ├── packages.txt            # system packages for Streamlit Cloud (ffmpeg)
 └── .gitignore
@@ -117,7 +120,7 @@ Never commit your real `.env` file. It is already listed in `.gitignore`.
 
 ### Good to know when deploying
 
-- **YouTube downloads may fail on cloud servers.** YouTube often blocks requests from data-center IP addresses, so a link that works on your laptop may fail once deployed. File upload is the reliable path.
+- **YouTube links may fail on cloud servers.** YouTube often blocks requests from data-center IP addresses, for both caption lookups and audio downloads, so a link that works on your laptop may fail once deployed. **Upload a file** and **Paste transcript** are the reliable options on the hosted app.
 - **Memory is limited on the free tier** (roughly 1 GB). Running Whisper locally for English may not fit. A hosted transcription API is a safer choice for a public deployment.
 - **Video length is capped.** Links longer than 90 minutes are rejected. Change `MAX_VIDEO_MINUTES` in `utils/audio_processor.py` to adjust this.
 - **Uploads are limited to 200 MB by default.** Raise the limit with `maxUploadSize` under `[server]` in `.streamlit/config.toml`.
